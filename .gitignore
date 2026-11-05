@@ -1,0 +1,4 @@
+/switchbot-panel
+*.env
+!.env.example
+/switchbot-panel.layout.json

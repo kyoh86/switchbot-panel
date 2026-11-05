@@ -1,0 +1,15 @@
+[Unit]
+Description=SwitchBot Panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/kyoh86/switchbot-panel
+EnvironmentFile=/home/kyoh86/switchbot-panel/switchbot-panel.env
+ExecStart=/home/kyoh86/switchbot-panel/switchbot-panel
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
