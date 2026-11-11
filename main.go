@@ -253,8 +253,8 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	devices = filterDevices(devices, "")
+	sortDevices(devices)
 	filtered := filterDevices(devices, q)
-	sortDevices(filtered)
 	for i := range filtered {
 		filtered[i].Actions = actionsForDevice(filtered[i])
 	}
@@ -266,6 +266,7 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	data := PageData{
 		Query:       q,
 		Devices:     filtered,
+		AllDevices:  devices,
 		Count:       len(filtered),
 		Total:       len(devices),
 		LastRefresh: lastRefresh,
@@ -1184,6 +1185,7 @@ func cloudService(enabled bool) string {
 type PageData struct {
 	Query       string
 	Devices     []Device
+	AllDevices  []Device
 	Count       int
 	Total       int
 	LastRefresh time.Time
@@ -1234,7 +1236,27 @@ const pageHTML = `<!doctype html>
     .toolbar { display:flex; gap:8px; align-items:center; min-width:0; }
     .toolbar input { min-width:0; width:100%; }
     .toolbar button, .toolbar a { flex-shrink:0; }
-    .refresh { justify-self:end; }
+    .header-actions { display:flex; justify-self:end; gap:8px; }
+    .layout-group + .layout-group { margin-top:24px; }
+    .layout-group h2 { margin:0 0 12px; font-size:16px; overflow-wrap:anywhere; }
+    .device-list.arranged { columns:auto; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap:16px; align-items:start; }
+    .arranged .device { margin:0; }
+    .layout-tools { position:sticky; top:0; z-index:2; padding:8px 0; background:var(--bg); }
+    .layout-tools > div, .layout-group-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    .layout-tools p { margin:8px 0 0; font-size:13px; color:var(--muted); }
+    .layout-group-controls { margin-bottom:10px; }
+    .layout-group-controls input { min-width:0; width:min(240px, 100%); }
+    .editing-layout .layout-group { padding:12px; border:1px dashed var(--line); border-radius:12px; }
+    .editing-layout .device-list { min-height:52px; }
+    .layout-handle { align-self:flex-end; touch-action:none; cursor:grab; }
+    .layout-dragging .layout-handle { cursor:grabbing; }
+    .device.layout-dragging { opacity:.55; }
+    .layout-drop-group { outline:2px solid var(--accent); }
+    .layout-drop-before { box-shadow:0 -4px 0 var(--accent); }
+    .layout-drop-after { box-shadow:0 4px 0 var(--accent); }
+    .layout-drop-left { box-shadow:-4px 0 0 var(--accent); }
+    .layout-drop-right { box-shadow:4px 0 0 var(--accent); }
+    #layout-error { color:var(--danger); }
     input, select, button { font:inherit; border:1px solid var(--line); background:var(--panel); color:var(--fg); border-radius:6px; min-height:38px; }
     input { padding:0 12px; min-width:min(320px, 100%); }
     input.compact { min-width:0; width:86px; }
@@ -1292,7 +1314,8 @@ const pageHTML = `<!doctype html>
     @media (max-width: 760px) {
       header { grid-template-columns:minmax(0, 1fr) auto; gap:8px 12px; }
       .toolbar { grid-column:1 / -1; grid-row:2; }
-      .refresh { grid-column:2; grid-row:1; }
+      .header-actions { grid-column:2; grid-row:1; }
+      .brand { flex-wrap:wrap; gap:2px 8px; }
       .device { grid-template-columns:1fr; }
       input.compact { width:74px; }
     }
@@ -1309,14 +1332,26 @@ const pageHTML = `<!doctype html>
       <button type="submit">検索</button>
       {{if .Query}}<a href="/">クリア</a>{{end}}
     </form>
-    <form class="refresh" method="post" action="/refresh"><input type="hidden" name="csrf" value="{{.CSRFToken}}"><input type="hidden" name="q" value="{{.Query}}"><button class="primary" type="submit" title="一覧の更新: {{since .LastRefresh}}">↻ 更新</button></form>
+    <div class="header-actions"><button type="button" id="layout-open" hidden>配置</button>
+    <form class="refresh" method="post" action="/refresh"><input type="hidden" name="csrf" value="{{.CSRFToken}}"><input type="hidden" name="q" value="{{.Query}}"><button class="primary" type="submit" title="一覧の更新: {{since .LastRefresh}}">↻ 更新</button></form></div>
   </header>
   <main>
     <p id="page-feedback" class="feedback" role="status" aria-live="polite" hidden></p>
-    <div class="device-list">
+    <div id="layout-tools" class="layout-tools" hidden>
+      <div>
+        <button type="button" id="layout-add">グループを追加</button>
+        <button type="button" id="layout-cancel">キャンセル</button>
+        <button type="button" id="layout-save" class="primary">保存</button>
+      </div>
+      <p>カードの「移動」をドラッグして配置を変更</p>
+      <p id="layout-error" role="alert" hidden></p>
+    </div>
+    <div class="device-board">
+      <template class="layout-devices">{{range .AllDevices}}<span data-id="{{.DeviceID}}">{{.DeviceName}}</span>{{end}}</template>
+      <div class="device-list">
     {{range .Devices}}
           {{$device := .}}
-          <article class="device" id="device-{{.DeviceID}}">
+          <article class="device" id="device-{{.DeviceID}}" data-device-id="{{.DeviceID}}">
             <div class="device-main">
               <div class="device-heading"><span class="device-icon" aria-hidden="true">{{.Icon}}</span><div class="device-title"><div class="name-row"><div class="name">{{.DeviceName}}</div><a class="details-link" aria-label="{{.DeviceName}}の詳細" href="{{detailsURL .DeviceID $.Query}}">詳細 ↗</a></div></div></div>
               {{if .Sensor}}
@@ -1358,6 +1393,7 @@ const pageHTML = `<!doctype html>
     {{else}}
     <div class="empty">該当する機器がありません。</div>
     {{end}}
+    </div>
     </div>
   </main>
 <script src="/panel.js" defer></script>

@@ -105,10 +105,11 @@
     const response = await fetch(location.pathname + location.search, { credentials: 'same-origin' });
     if (!response.ok) throw new Error('一覧を取得できませんでした。現在の表示と編集中の設定は保持しています。');
     const page = new DOMParser().parseFromString(await response.text(), 'text/html');
-    const next = page.querySelector('.device-list');
+    const next = page.querySelector('.device-board');
     if (!next) throw new Error('一覧を更新できませんでした。');
     const position = { x: scrollX, y: scrollY };
-    document.querySelector('.device-list').replaceWith(next);
+    document.querySelector('.device-board').replaceWith(next);
+    arrangeDevices();
     document.querySelector('.device-count').textContent = page.querySelector('.device-count').textContent;
     submitButton(form).title = submitButton(page.querySelector('.refresh')).title;
     restore();
@@ -119,7 +120,7 @@
     const form = event.target;
     if (!form.matches('.commands form, .refresh')) return;
     event.preventDefault();
-    if (pending.has(form)) return;
+    if (pending.has(form) || editing) return;
     const isRefresh = form.matches('.refresh');
     if (refreshing || (isRefresh && commandCount > 0)) {
       feedback(form, '処理中です。完了してから操作してください。');
@@ -169,6 +170,249 @@
     }
   });
 
+  const layoutKey = 'switchbot-panel-layout-v1';
+  const layoutTools = document.getElementById('layout-tools');
+  const layoutError = document.getElementById('layout-error');
+  const ungrouped = '未分類';
+  const emptyLayout = () => [{ name: ungrouped, ids: [] }];
+  let layout = readLayout();
+  let editing;
+  let drag;
+
+  function readLayout() {
+    try {
+      const groups = JSON.parse(localStorage.getItem(layoutKey));
+      if (Array.isArray(groups) && groups.length && groups.every(group =>
+        group && typeof group.name === 'string' && Array.isArray(group.ids) &&
+        group.ids.every(id => typeof id === 'string'))) return groups;
+    } catch (_) { /* Start with the default layout if storage is unavailable. */ }
+    return emptyLayout();
+  }
+
+  function withNewDevices(groups, ids) {
+    const assigned = new Set(groups.flatMap(group => group.ids));
+    groups[0].ids.push(...ids.filter(id => !assigned.has(id)));
+    return groups;
+  }
+
+  function arrangeDevices(focusId) {
+    const board = document.querySelector('.device-board');
+    const metadata = board.querySelector('.layout-devices');
+    const cards = new Map([...board.querySelectorAll('.device')].map(card => [card.dataset.deviceId, card]));
+    const ids = [...metadata.content.querySelectorAll('[data-id]')].map(device => device.dataset.id);
+    const customLayout = layout.length > 1 || layout[0].ids.length > 0;
+    const groups = editing || withNewDevices(structuredClone(layout), ids);
+    const sections = [];
+
+    board.classList.toggle('editing-layout', Boolean(editing));
+    for (const index of [...groups.keys()].slice(1).concat(0)) {
+      const group = groups[index];
+      const list = document.createElement('div');
+      list.className = editing || customLayout ? 'device-list arranged' : 'device-list';
+      for (const id of group.ids) {
+        const card = cards.get(id);
+        if (!card) continue;
+        card.querySelector('.layout-handle')?.remove();
+        for (const child of card.children) child.inert = Boolean(editing);
+        if (editing) card.prepend(dragHandle(card, index));
+        list.append(card);
+        cards.delete(id);
+      }
+      if (!editing && !list.childElementCount) continue;
+      if (!editing && groups.length === 1) {
+        sections.push(list);
+        continue;
+      }
+      const section = document.createElement('section');
+      section.className = 'layout-group';
+      section.dataset.layoutGroup = index;
+      if (editing && index !== 0) {
+        const controls = document.createElement('div');
+        controls.className = 'layout-group-controls';
+        const name = document.createElement('input');
+        name.value = group.name;
+        name.placeholder = 'グループ名';
+        name.maxLength = 60;
+        name.setAttribute('aria-label', 'グループ名');
+        name.addEventListener('input', () => { group.name = name.value; });
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = 'グループを削除';
+        remove.addEventListener('click', () => {
+          editing[0].ids.push(...group.ids);
+          editing.splice(index, 1);
+          arrangeDevices();
+        });
+        controls.append(name, remove);
+        section.append(controls);
+      } else {
+        const heading = document.createElement('h2');
+        heading.textContent = group.name;
+        section.append(heading);
+      }
+      section.append(list);
+      sections.push(section);
+    }
+    const empty = board.querySelector('.empty') || document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = '該当する機器がありません。';
+    board.replaceChildren(metadata, ...(sections.length ? sections : [empty]));
+    if (focusId) document.getElementById('device-' + focusId)?.querySelector('.layout-handle')?.focus({ preventScroll: true });
+  }
+
+  function moveCard(id, from, to, relativeTo, after) {
+    const source = editing[from].ids;
+    source.splice(source.indexOf(id), 1);
+    const destination = editing[to].ids;
+    const position = relativeTo ? destination.indexOf(relativeTo) + Number(after) : destination.length;
+    destination.splice(position, 0, id);
+    arrangeDevices(id);
+  }
+
+  function dragHandle(card, index) {
+    const handle = document.createElement('button');
+    const id = card.dataset.deviceId;
+    handle.type = 'button';
+    handle.className = 'layout-handle';
+    handle.textContent = '⠿ 移動';
+    handle.setAttribute('aria-label', card.querySelector('.name').textContent + 'を移動');
+    handle.setAttribute('aria-description', '上下キーで順番を変更、左右キーでグループを移動');
+    handle.addEventListener('pointerdown', event => {
+      if (!event.isPrimary || event.button !== 0 || drag) return;
+      handle.setPointerCapture(event.pointerId);
+      drag = { id, index, card, pointer: event.pointerId, x: event.clientX, y: event.clientY };
+    });
+    handle.addEventListener('pointermove', event => {
+      if (drag?.pointer !== event.pointerId) return;
+      if (!drag.active && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 5) return;
+      if (!drag.active) {
+        drag.active = true;
+        card.classList.add('layout-dragging');
+        drag.frame = requestAnimationFrame(scrollDrag);
+      }
+      drag.x = event.clientX;
+      drag.y = event.clientY;
+      updateDropTarget();
+    });
+    handle.addEventListener('pointerup', event => {
+      if (drag?.pointer !== event.pointerId) return;
+      if (drag.active) {
+        drag.x = event.clientX;
+        drag.y = event.clientY;
+        updateDropTarget();
+      }
+      const target = drag.target;
+      clearDrag();
+      if (target) moveCard(id, index, target.index, target.id, target.after);
+    });
+    handle.addEventListener('lostpointercapture', () => {
+      if (drag?.card === card) clearDrag();
+    });
+    handle.addEventListener('keydown', event => {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        const order = [...editing.keys()].slice(1).concat(0);
+        const to = order[order.indexOf(index) + (event.key === 'ArrowLeft' ? -1 : 1)];
+        if (to !== undefined) moveCard(id, index, to);
+        return;
+      }
+      const cards = [...card.parentElement.querySelectorAll('.device')];
+      const position = cards.indexOf(card);
+      const offset = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0;
+      if (offset) {
+        event.preventDefault();
+        const neighbor = cards[position + offset];
+        if (neighbor) moveCard(id, index, index, neighbor.dataset.deviceId, offset > 0);
+      }
+    });
+    return handle;
+  }
+
+  function updateDropTarget() {
+    drag.marker?.classList.remove(drag.markerClass);
+    drag.target = null;
+    const hit = document.elementFromPoint(drag.x, drag.y);
+    const section = hit?.closest('[data-layout-group]');
+    const card = hit?.closest('.device');
+    if (!section || card === drag.card) return;
+    const rect = card?.getBoundingClientRect();
+    const multiColumn = card && card.parentElement.clientWidth > rect.width + 20;
+    const after = card && (multiColumn ? drag.x > rect.left + rect.width / 2 : drag.y > rect.top + rect.height / 2);
+    drag.target = { index: Number(section.dataset.layoutGroup), id: card?.dataset.deviceId, after };
+    drag.marker = card || section;
+    if (multiColumn) drag.markerClass = after ? 'layout-drop-right' : 'layout-drop-left';
+    else drag.markerClass = card ? (after ? 'layout-drop-after' : 'layout-drop-before') : 'layout-drop-group';
+    drag.marker.classList.add(drag.markerClass);
+  }
+
+  function scrollDrag() {
+    if (!drag?.active) return;
+    const step = drag.y < 70 ? -12 : drag.y > innerHeight - 70 ? 12 : 0;
+    if (step) {
+      scrollBy(0, step);
+      updateDropTarget();
+    }
+    drag.frame = requestAnimationFrame(scrollDrag);
+  }
+
+  function clearDrag() {
+    cancelAnimationFrame(drag.frame);
+    drag.marker?.classList.remove(drag.markerClass);
+    drag.card.classList.remove('layout-dragging');
+    drag = null;
+  }
+
+  const openLayout = document.getElementById('layout-open');
+  const refreshButton = submitButton(document.querySelector('.refresh'));
+  openLayout.hidden = false;
+  openLayout.addEventListener('click', () => {
+    if (refreshing || commandCount || editing) return;
+    const devices = document.querySelector('.layout-devices').content.querySelectorAll('[data-id]');
+    editing = withNewDevices(structuredClone(layout), [...devices].map(device => device.dataset.id));
+    openLayout.hidden = true;
+    refreshButton.disabled = true;
+    layoutTools.hidden = false;
+    layoutError.hidden = true;
+    arrangeDevices();
+    document.getElementById('layout-add').focus();
+  });
+
+  function closeLayout() {
+    if (drag) clearDrag();
+    editing = null;
+    layoutTools.hidden = true;
+    openLayout.hidden = false;
+    refreshButton.disabled = false;
+    arrangeDevices();
+    openLayout.focus();
+  }
+
+  document.getElementById('layout-add').addEventListener('click', () => {
+    editing.push({ name: '', ids: [] });
+    arrangeDevices();
+    document.querySelector('[data-layout-group="' + (editing.length - 1) + '"] input').focus();
+  });
+  document.getElementById('layout-cancel').addEventListener('click', closeLayout);
+  document.getElementById('layout-save').addEventListener('click', () => {
+    const names = editing.slice(1).map(group => group.name.trim());
+    if (names.some(name => !name || name === ungrouped) || new Set(names).size !== names.length) {
+      layoutError.textContent = 'グループには重複しない名前を入力してください。';
+      layoutError.hidden = false;
+      return;
+    }
+    for (const group of editing) group.name = group.name.trim();
+    try {
+      localStorage.setItem(layoutKey, JSON.stringify(editing));
+    } catch (_) {
+      layoutError.textContent = 'このブラウザに配置を保存できませんでした。';
+      layoutError.hidden = false;
+      return;
+    }
+    layout = editing;
+    closeLayout();
+  });
+
+  arrangeDevices();
   restore();
   // History navigation can restore a document without re-running its script.
   addEventListener('pageshow', restore);
