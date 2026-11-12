@@ -33,7 +33,7 @@
   }
 
   function draftReadout(form) {
-    const output = form.querySelector('output');
+    const output = form.querySelector('.light-setting-body output') || form.querySelector('output');
     const value = form.querySelector('input[type="range"], input[type="color"]');
     if (!value) return;
     if (value.type === 'color') {
@@ -131,6 +131,9 @@
     const revision = form.dataset.revision || '0';
     const isSetting = form.matches('.setting-control');
     const buttonLabel = submitButton(form).textContent;
+    const light = form.querySelector('.light-setting');
+    const submittedValue = light?.querySelector('.light-setting-body output')?.textContent;
+    const submittedColor = light?.querySelector('input[type="color"]')?.value;
     pending.add(form);
     if (isRefresh) refreshing = true;
     else commandCount++;
@@ -146,11 +149,22 @@
         await refreshList(form);
       } else {
         await post(form);
+        if (submittedValue) light.querySelector('summary output').textContent = submittedValue;
+        if (submittedColor) {
+          const swatch = light.querySelector('.light-color');
+          swatch.style.setProperty('--light-color', submittedColor === '#000000' ? 'transparent' : submittedColor);
+          swatch.setAttribute('aria-label', '光の色');
+        }
         // A newer edit made while the request was in flight remains a draft.
         if ((form.dataset.revision || '0') === revision) {
           delete drafts[key(form)];
           delete form.dataset.dirty;
           persist();
+          if (light?.open) {
+            const focused = light.contains(document.activeElement);
+            light.open = false;
+            if (focused) light.querySelector('summary').focus({ preventScroll: true });
+          }
         }
         const box = form.querySelector('.feedback');
         if (box) {

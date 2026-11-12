@@ -1345,6 +1345,16 @@ const pageHTML = `<!doctype html>
     .commands > form > button { display:flex; flex-direction:column; justify-content:center; align-items:center; gap:8px; width:100%; min-height:70px; padding:10px 4px; font-size:12px; border-radius:12px; }
     .action-icon { font-size:24px; line-height:1; }
     .commands > .setting-control { grid-column:1 / -1; display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:center; gap:10px; padding:14px; border:1px solid var(--line); border-radius:14px; }
+    .commands > .light-control { display:block; padding:0; }
+    .light-setting summary { display:flex; align-items:center; gap:8px; min-height:36px; padding:6px 12px; list-style:none; cursor:pointer; font-size:13px; }
+    .light-setting summary::-webkit-details-marker { display:none; }
+    .light-setting summary::after { content:'⌄'; color:var(--muted); }
+    .light-setting[open] summary::after { transform:rotate(180deg); }
+    .light-setting-body { display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:center; gap:8px; padding:0 12px 8px; }
+    .light-setting:not([open]) .light-setting-body { display:none; }
+    .light-setting-body output { grid-column:1 / -1; font-size:12px; }
+    .light-control > .feedback { margin:4px 12px 8px; }
+    .light-color { width:20px; height:16px; border:1px solid var(--line); border-radius:4px; margin-inline-start:auto; background:linear-gradient(var(--light-color),var(--light-color)), repeating-conic-gradient(var(--panel) 0% 25%, var(--line) 0% 50%) 0 / 8px 8px; }
     .setting-control > label { grid-column:1 / -1; display:flex; align-items:center; gap:8px; font-size:13px; }
     .setting-control output { margin-left:auto; font-variant-numeric:tabular-nums; }
     .setting-control input[type=range] { appearance:none; width:100%; min-width:0; padding:0; border:0; background:transparent; cursor:pointer; }
@@ -1357,7 +1367,7 @@ const pageHTML = `<!doctype html>
     .color-picker input[type=color] { position:absolute; inset:0; width:100%; height:100%; min-width:0; opacity:0; cursor:pointer; }
     .setting-control > .color-picker { grid-column:1; display:grid; gap:0; }
     .color-picker:focus-within { outline:2px solid var(--accent); outline-offset:2px; }
-    .commands > form > .apply-button { min-height:42px; width:auto; padding:0 14px; justify-self:end; }
+    .commands > form > .apply-button, .light-setting-body > .apply-button { min-height:42px; width:auto; padding:0 14px; justify-self:end; }
     .setting-control select { padding:0 10px; min-width:0; }
     .setting-control input[data-unit="K"] { --slider-track:linear-gradient(90deg, #ffbb59, #f9f5e9, #bfdcff); }
     .commands > .setting-control > select { grid-column:1 / -1; width:100%; }
@@ -1452,15 +1462,20 @@ const pageHTML = `<!doctype html>
             {{if .Actions}}
             <div class="commands">
               {{range .Actions}}
-              <form{{if .ParamKind}} class="setting-control"{{end}} method="post" action="/devices/{{$device.DeviceID}}/command">
+              {{$light := or (eq .ParamKind "number") (eq .ParamKind "color")}}
+              <form{{if .ParamKind}} class="setting-control{{if $light}} light-control{{end}}"{{end}} method="post" action="/devices/{{$device.DeviceID}}/command">
                 <input type="hidden" name="csrf" value="{{$.CSRFToken}}">
                 <input type="hidden" name="action" value="{{.ID}}">
                 <input type="hidden" name="q" value="{{$.Query}}">
+                {{if $light}}
+                <details class="light-setting">
+                  <summary><span aria-hidden="true">{{.Icon}}</span>{{.Title}}{{if eq .ParamKind "number"}}<output>{{if .CurrentValue}}{{.DisplayValue}} {{.Unit}}{{else}}未取得{{end}}</output>{{else}}<span class="light-color" style="--light-color:{{.ColorPreview}}" aria-label="{{if .CurrentValue}}光の色{{else}}色は未取得{{end}}"></span>{{end}}</summary>
+                  <div class="light-setting-body">
+                {{end}}
                 {{if eq .ParamKind "number"}}
-                <label><span aria-hidden="true">{{.Icon}}</span>{{.Title}}<output>{{if .CurrentValue}}{{.DisplayValue}} {{.Unit}}{{else}}未取得{{end}}</output></label>
+                <output>{{if .CurrentValue}}{{.DisplayValue}} {{.Unit}}{{else}}未取得{{end}}</output>
                 <input aria-label="{{.Title}}" type="range" name="parameter" min="{{.Min}}" max="{{.Max}}" step="1" value="{{.InitialValue}}" data-unit="{{.Unit}}">
                 {{else if eq .ParamKind "color"}}
-                <label><span aria-hidden="true">🎨</span>{{.Title}}{{if not .CurrentValue}}<output>未取得</output>{{end}}</label>
                 <label class="color-picker" style="--picked-color:{{.ColorPreview}}"><span aria-hidden="true">色を選ぶ</span><input aria-label="{{.Title}}" type="color" name="parameter" value="{{.InitialValue}}"></label>
                 {{else if eq .ParamKind "curtain_position"}}
                 <label><span aria-hidden="true">▥</span>閉じ具合<output>{{if .CurrentValue}}{{.CurrentValue}} %{{else}}未取得{{end}}</output></label>
@@ -1471,6 +1486,10 @@ const pageHTML = `<!doctype html>
                 <input aria-label="ブラインドの角度" type="range" name="position" min="0" max="100" step="2" value="{{.InitialValue}}" data-unit="%">
                 {{end}}
                 <button{{if .ParamKind}} class="apply-button"{{end}} type="submit"{{if .ParamKind}} disabled{{end}}>{{if .ParamKind}}適用{{else}}<span class="action-icon" aria-hidden="true">{{.Icon}}</span>{{.Title}}{{end}}</button>
+                {{if $light}}
+                  </div>
+                </details>
+                {{end}}
               </form>
               {{end}}
             </div>
