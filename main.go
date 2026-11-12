@@ -287,8 +287,12 @@ func (a *App) loadDeviceReadings(ctx context.Context, devices []Device) {
 		d := &devices[i]
 		kind := strings.ToLower(d.DeviceType)
 		d.Sensor = !d.InfraredRemote && (strings.Contains(kind, "meter") || strings.Contains(kind, "hub 2") || strings.Contains(kind, "hub 3") || strings.Contains(kind, "outdoor thermo"))
-		if d.InfraredRemote || (!d.Sensor && !isLightDevice(kind) && !strings.Contains(kind, "curtain") && !strings.Contains(kind, "shade") && !strings.Contains(kind, "blind tilt")) {
+		detectionSensor := kind == "motion sensor" || kind == "presence sensor" || kind == "contact sensor"
+		if d.InfraredRemote || (!d.Sensor && !detectionSensor && !isLightDevice(kind) && !strings.Contains(kind, "curtain") && !strings.Contains(kind, "shade") && !strings.Contains(kind, "blind tilt")) {
 			continue
+		}
+		if detectionSensor {
+			d.SensorState = "未取得"
 		}
 		wg.Add(1)
 		go func() {
@@ -308,6 +312,35 @@ func (a *App) loadDeviceReadings(ctx context.Context, devices []Device) {
 					d.SensorError = "温湿度を取得できませんでした"
 				}
 				return
+			}
+			switch kind {
+			case "presence sensor":
+				detected, ok := cached.Status["detected"].(bool)
+				if !ok {
+					detected, ok = cached.Status["Detected"].(bool)
+				}
+				if ok {
+					d.SensorState = "不在"
+					if detected {
+						d.SensorState, d.SensorStateTone = "在室", "active"
+					}
+				}
+			case "motion sensor":
+				if detected, ok := cached.Status["moveDetected"].(bool); ok {
+					d.SensorState = "動きなし"
+					if detected {
+						d.SensorState, d.SensorStateTone = "動きあり", "active"
+					}
+				}
+			case "contact sensor":
+				switch cached.Status["openState"] {
+				case "close":
+					d.SensorState = "閉"
+				case "open":
+					d.SensorState, d.SensorStateTone = "開", "active"
+				case "timeOutNotClose":
+					d.SensorState, d.SensorStateTone = "開いたまま", "warning"
+				}
 			}
 			for i := range d.Actions {
 				d.Actions[i].loadStatus(cached.Status)
@@ -1058,6 +1091,8 @@ type Device struct {
 	Temperature         string `json:"-"`
 	Humidity            string `json:"-"`
 	SensorError         string `json:"-"`
+	SensorState         string `json:"-"`
+	SensorStateTone     string `json:"-"`
 }
 
 type CommandRequest struct {
@@ -1277,6 +1312,9 @@ const pageHTML = `<!doctype html>
     .device-title { flex:1; min-width:0; }
     .name-row { display:flex; align-items:baseline; gap:8px; }
     .name-row .name { flex:1; min-width:0; }
+    .sensor-state { display:inline-block; margin-inline-start:8px; padding:2px 7px; border-radius:6px; font-size:12px; font-weight:600; color:var(--muted); background:color-mix(in srgb, var(--muted) 10%, var(--panel)); white-space:nowrap; }
+    .sensor-state[data-tone="active"] { color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--panel)); }
+    .sensor-state[data-tone="warning"] { color:var(--danger); background:color-mix(in srgb, var(--danger) 12%, var(--panel)); }
     .details-link { flex-shrink:0; font-size:12px; padding:8px 0 8px 8px; }
     .name { overflow-wrap:anywhere; }
     .device-meta { margin-top:4px; display:flex; gap:8px; flex-wrap:wrap; color:var(--muted); font-size:12px; }
@@ -1377,7 +1415,7 @@ const pageHTML = `<!doctype html>
                 <span class="device-icon" aria-hidden="true">{{.Icon}}</span>
                 <div class="device-title">
                   <div class="name-row">
-                    <div class="name">{{.DeviceName}}</div>
+                    <div class="name">{{.DeviceName}}{{if .SensorState}}<span class="sensor-state" data-tone="{{.SensorStateTone}}">{{.SensorState}}</span>{{end}}</div>
                     {{if .Sensor}}
                     <details class="sensor-thresholds" hidden>
                 <summary>しきい値</summary>

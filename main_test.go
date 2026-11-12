@@ -422,3 +422,29 @@ func TestLoadEnvFileDoesNotOverrideExistingEnv(t *testing.T) {
 		t.Fatalf("SWITCHBOT_TOKEN = %q", got)
 	}
 }
+
+func TestIndexShowsPresenceSensorState(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status map[string]any
+		want   string
+	}{
+		{"actual API key", map[string]any{"detected": false}, "不在"},
+		{"documented key", map[string]any{"Detected": true}, "在室"},
+		{"missing", map[string]any{}, "未取得"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			app := &App{
+				cacheTTL: time.Minute, statusTTL: time.Minute, devicesAt: now,
+				devices:  []Device{{DeviceID: "pro", DeviceName: "人感センサーPro", DeviceType: "Presence Sensor"}},
+				statuses: map[string]CachedStatus{"pro": {FetchedAt: now, Status: tc.status}},
+			}
+			w := httptest.NewRecorder()
+			app.handleIndex(w, httptest.NewRequest(http.MethodGet, "/", nil))
+			if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), ">"+tc.want+"</span>") {
+				t.Fatalf("index status %d, expected sensor label %q", w.Code, tc.want)
+			}
+		})
+	}
+}
