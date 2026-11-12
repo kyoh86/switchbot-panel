@@ -110,6 +110,7 @@
     const position = { x: scrollX, y: scrollY };
     document.querySelector('.device-board').replaceWith(next);
     arrangeDevices();
+    restoreThresholds();
     document.querySelector('.device-count').textContent = page.querySelector('.device-count').textContent;
     submitButton(form).title = submitButton(page.querySelector('.refresh')).title;
     restore();
@@ -474,7 +475,90 @@
     closeLayout();
   });
 
+  const thresholdKey = 'switchbot-panel-sensor-thresholds-v1';
+  const metrics = ['temperature', 'humidity'];
+  let thresholds = Object.create(null);
+  try {
+    const saved = JSON.parse(localStorage.getItem(thresholdKey));
+    if (saved && typeof saved === 'object') Object.assign(thresholds, saved);
+  } catch (_) {}
+
+  function updateSensorReadings(card) {
+    const settings = thresholds[card.dataset.deviceId];
+    for (const reading of card.querySelectorAll('[data-metric]')) {
+      const rule = settings?.[reading.dataset.metric];
+      const value = Number(reading.dataset.value);
+      const below = Number.isFinite(rule?.minimum) && reading.dataset.value.trim() !== '' &&
+        Number.isFinite(value) && value < rule.minimum;
+      if (below) reading.dataset.alert = rule.color === 'yellow' ? 'yellow' : 'red';
+      else delete reading.dataset.alert;
+      reading.querySelector('.reading-alert').hidden = !below;
+    }
+  }
+
+  function restoreThresholds() {
+    for (const details of document.querySelectorAll('.sensor-thresholds')) {
+      const card = details.closest('.device');
+      const form = details.querySelector('form');
+      const settings = thresholds[card.dataset.deviceId];
+      for (const metric of metrics) {
+        const rule = settings?.[metric];
+        form.elements[metric].value = Number.isFinite(rule?.minimum) ? rule.minimum : '';
+        form.elements[metric + '-color'].value = rule?.color === 'yellow' ? 'yellow' : 'red';
+      }
+      details.hidden = false;
+      updateSensorReadings(card);
+    }
+  }
+
+  document.addEventListener('click', event => {
+    for (const details of document.querySelectorAll('.sensor-thresholds[open]')) {
+      if (!details.contains(event.target)) details.open = false;
+    }
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    const details = event.target.closest('.sensor-thresholds[open]');
+    if (details) {
+      details.open = false;
+      details.querySelector('summary').focus();
+    }
+  });
+
+  document.addEventListener('submit', event => {
+    const form = event.target;
+    if (!form.matches('.sensor-thresholds form')) return;
+    event.preventDefault();
+    if (editing || !form.checkValidity()) return;
+    const card = form.closest('.device');
+    const id = card.dataset.deviceId;
+    const settings = {};
+    for (const metric of metrics) {
+      const minimum = form.elements[metric].valueAsNumber;
+      if (Number.isFinite(minimum)) {
+        settings[metric] = { minimum, color: form.elements[metric + '-color'].value };
+      }
+    }
+    const next = Object.assign(Object.create(null), thresholds);
+    if (Object.keys(settings).length) next[id] = settings;
+    else delete next[id];
+    const error = form.querySelector('.feedback');
+    try {
+      localStorage.setItem(thresholdKey, JSON.stringify(next));
+    } catch (_) {
+      error.textContent = 'このブラウザにしきい値を保存できませんでした。';
+      error.dataset.kind = 'error';
+      error.hidden = false;
+      return;
+    }
+    thresholds = next;
+    updateSensorReadings(card);
+    error.hidden = true;
+    form.closest('details').open = false;
+  });
+
   arrangeDevices();
+  restoreThresholds();
   restore();
   // History navigation can restore a document without re-running its script.
   addEventListener('pageshow', restore);

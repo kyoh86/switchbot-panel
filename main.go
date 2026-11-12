@@ -1271,11 +1271,11 @@ const pageHTML = `<!doctype html>
     button:disabled { opacity:0.45; cursor:default; }
     .device-list { columns:330px; column-gap:16px; }
     .device { display:inline-flex; width:100%; break-inside:avoid; margin-bottom:16px; vertical-align:top; flex-direction:column; gap:18px; padding:20px; min-width:0; border:1px solid var(--line); background:var(--panel); border-radius:20px; box-shadow:0 3px 12px #00000005; }
-    .device-main { min-width:0; width:100%; }
+    .device-main { position:relative; min-width:0; width:100%; }
     .device-heading { display:flex; gap:12px; align-items:center; }
     .device-icon { display:grid; place-items:center; width:48px; height:48px; flex-shrink:0; border-radius:14px; font-size:28px; background:color-mix(in srgb, var(--accent) 10%, var(--panel)); }
     .device-title { flex:1; min-width:0; }
-    .name-row { display:flex; align-items:baseline; gap:12px; }
+    .name-row { display:flex; align-items:baseline; gap:8px; }
     .name-row .name { flex:1; min-width:0; }
     .details-link { flex-shrink:0; font-size:12px; padding:8px 0 8px 8px; }
     .name { overflow-wrap:anywhere; }
@@ -1285,7 +1285,23 @@ const pageHTML = `<!doctype html>
     .muted { color:var(--muted); }
     .name { font-weight:650; }
     .readings { display:flex; justify-content:space-around; gap:16px; flex-wrap:wrap; margin-top:24px; padding:16px 0; font-size:32px; font-weight:650; }
-    .readings > span { display:flex; flex-direction:column; gap:8px; }
+    .readings > span { display:flex; flex-direction:column; gap:8px; padding:8px; border-radius:8px; }
+    .reading-alert { font-size:12px; font-weight:600; }
+    .readings [data-alert="red"] { color:#a52319; background:#ffe3df; }
+    .readings [data-alert="yellow"] { color:#715000; background:#fff0bc; }
+    @media (prefers-color-scheme: dark) {
+      .readings [data-alert="red"] { color:#ffb7ae; background:#502521; }
+      .readings [data-alert="yellow"] { color:#ffe08b; background:#433715; }
+    }
+    .device:has(.sensor-thresholds[open]) { position:relative; z-index:1; }
+    .sensor-thresholds { flex-shrink:0; font-size:12px; }
+    .sensor-thresholds summary { list-style:none; cursor:pointer; color:var(--accent); }
+    .sensor-thresholds summary::-webkit-details-marker { display:none; }
+    .sensor-thresholds form { position:absolute; right:0; width:min(330px, 100%); z-index:1; display:grid; gap:8px; margin-top:8px; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--panel); box-shadow:0 6px 20px #0003; }
+    .sensor-thresholds fieldset { display:flex; flex-wrap:wrap; gap:8px; margin:0; min-width:0; border:1px solid var(--line); border-radius:8px; }
+    .sensor-thresholds label { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+    .sensor-thresholds input { width:88px; min-width:0; }
+    .sensor-thresholds button { justify-self:end; }
     .reading-label { font-size:12px; color:var(--muted); font-weight:400; margin-right:4px; }
     .commands { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; width:100%; align-items:start; }
     .commands > form > button { display:flex; flex-direction:column; justify-content:center; align-items:center; gap:8px; width:100%; min-height:70px; padding:10px 4px; font-size:12px; border-radius:12px; }
@@ -1357,12 +1373,40 @@ const pageHTML = `<!doctype html>
           {{$device := .}}
           <article class="device" id="device-{{.DeviceID}}" data-device-id="{{.DeviceID}}">
             <div class="device-main">
-              <div class="device-heading"><span class="device-icon" aria-hidden="true">{{.Icon}}</span><div class="device-title"><div class="name-row"><div class="name">{{.DeviceName}}</div><a class="details-link" aria-label="{{.DeviceName}}の詳細" href="{{detailsURL .DeviceID $.Query}}">詳細 ↗</a></div></div></div>
+              <div class="device-heading">
+                <span class="device-icon" aria-hidden="true">{{.Icon}}</span>
+                <div class="device-title">
+                  <div class="name-row">
+                    <div class="name">{{.DeviceName}}</div>
+                    {{if .Sensor}}
+                    <details class="sensor-thresholds" hidden>
+                <summary>しきい値</summary>
+                <form>
+                  <fieldset>
+                    <legend>温度</legend>
+                    <label>下限 <input type="number" name="temperature" step="any" placeholder="未設定"> °C</label>
+                    <label>表示色 <select name="temperature-color"><option value="red">赤</option><option value="yellow">黄</option></select></label>
+                  </fieldset>
+                  <fieldset>
+                    <legend>湿度</legend>
+                    <label>下限 <input type="number" name="humidity" min="0" max="100" step="any" placeholder="未設定"> %</label>
+                    <label>表示色 <select name="humidity-color"><option value="red">赤</option><option value="yellow">黄</option></select></label>
+                  </fieldset>
+                  <p class="feedback" role="alert" hidden></p>
+                  <button type="submit">保存</button>
+                </form>
+              </details>
+                    {{end}}
+                    <a class="details-link" aria-label="{{.DeviceName}}の詳細" href="{{detailsURL .DeviceID $.Query}}">詳細 ↗</a>
+                  </div>
+                </div>
+              </div>
               {{if .Sensor}}
               <div class="readings">
-                <span><span class="reading-label">🌡 温度</span>{{if .Temperature}}{{.Temperature}} °C{{else}}—{{end}}</span>
-                <span><span class="reading-label">💧 湿度</span>{{if .Humidity}}{{.Humidity}} %{{else}}—{{end}}</span>
+                <span data-metric="temperature" data-value="{{.Temperature}}"><span class="reading-label">🌡 温度</span>{{if .Temperature}}{{.Temperature}} °C{{else}}—{{end}}<span class="reading-alert" hidden>下限未満</span></span>
+                <span data-metric="humidity" data-value="{{.Humidity}}"><span class="reading-label">💧 湿度</span>{{if .Humidity}}{{.Humidity}} %{{else}}—{{end}}<span class="reading-alert" hidden>下限未満</span></span>
               </div>
+
               {{if .SensorError}}<div class="muted">{{.SensorError}}</div>{{end}}
               {{end}}
 
