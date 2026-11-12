@@ -1239,7 +1239,11 @@ const pageHTML = `<!doctype html>
     .header-actions { display:flex; justify-self:end; gap:8px; }
     .layout-group + .layout-group { margin-top:24px; }
     .layout-group h2 { margin:0 0 12px; font-size:16px; overflow-wrap:anywhere; }
+    .layout-toggle { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; padding:8px 12px; text-align:left; }
+    .layout-toggle::after { content:'⌄'; flex-shrink:0; }
+    .layout-toggle[aria-expanded="true"]::after { transform:rotate(180deg); }
     .device-list.arranged { columns:auto; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap:16px; align-items:start; }
+    .device-list.arranged[hidden] { display:none; }
     .arranged .device { margin:0; }
     .layout-tools { position:sticky; top:0; z-index:2; padding:8px 0; background:var(--bg); }
     .layout-tools > div, .layout-group-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
@@ -1250,7 +1254,7 @@ const pageHTML = `<!doctype html>
     .editing-layout .device-list { min-height:52px; }
     .layout-handle { align-self:flex-end; touch-action:none; cursor:grab; }
     .layout-dragging .layout-handle { cursor:grabbing; }
-    .device.layout-dragging { opacity:.55; }
+    .layout-dragging { opacity:.55; }
     .layout-drop-group { outline:2px solid var(--accent); }
     .layout-drop-before { box-shadow:0 -4px 0 var(--accent); }
     .layout-drop-after { box-shadow:0 4px 0 var(--accent); }
@@ -1343,7 +1347,7 @@ const pageHTML = `<!doctype html>
         <button type="button" id="layout-cancel">キャンセル</button>
         <button type="button" id="layout-save" class="primary">保存</button>
       </div>
-      <p>カードの「移動」をドラッグして配置を変更</p>
+      <p>移動ハンドルをドラッグしてカードやグループを並べ替え</p>
       <p id="layout-error" role="alert" hidden></p>
     </div>
     <div class="device-board">

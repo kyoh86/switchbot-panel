@@ -243,11 +243,30 @@
           editing.splice(index, 1);
           arrangeDevices();
         });
-        controls.append(name, remove);
+        controls.append(groupHandle(section, index), name, remove);
         section.append(controls);
       } else {
         const heading = document.createElement('h2');
-        heading.textContent = group.name;
+        if (editing) {
+          heading.textContent = group.name;
+        } else {
+          const toggle = document.createElement('button');
+          toggle.type = 'button';
+          toggle.className = 'layout-toggle';
+          toggle.textContent = group.name;
+          list.id = 'layout-cards-' + index;
+          toggle.setAttribute('aria-controls', list.id);
+          const returningToCard = [...list.children].some(card => '#' + encodeURIComponent(card.id) === location.hash);
+          list.hidden = group.collapsed === true && !returningToCard;
+          toggle.setAttribute('aria-expanded', String(!list.hidden));
+          toggle.addEventListener('click', () => {
+            list.hidden = !list.hidden;
+            toggle.setAttribute('aria-expanded', String(!list.hidden));
+            layout[index].collapsed = list.hidden;
+            try { localStorage.setItem(layoutKey, JSON.stringify(layout)); } catch (_) {}
+          });
+          heading.append(toggle);
+        }
         section.append(heading);
       }
       section.append(list);
@@ -277,37 +296,7 @@
     handle.textContent = '⠿ 移動';
     handle.setAttribute('aria-label', card.querySelector('.name').textContent + 'を移動');
     handle.setAttribute('aria-description', '上下キーで順番を変更、左右キーでグループを移動');
-    handle.addEventListener('pointerdown', event => {
-      if (!event.isPrimary || event.button !== 0 || drag) return;
-      handle.setPointerCapture(event.pointerId);
-      drag = { id, index, card, pointer: event.pointerId, x: event.clientX, y: event.clientY };
-    });
-    handle.addEventListener('pointermove', event => {
-      if (drag?.pointer !== event.pointerId) return;
-      if (!drag.active && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 5) return;
-      if (!drag.active) {
-        drag.active = true;
-        card.classList.add('layout-dragging');
-        drag.frame = requestAnimationFrame(scrollDrag);
-      }
-      drag.x = event.clientX;
-      drag.y = event.clientY;
-      updateDropTarget();
-    });
-    handle.addEventListener('pointerup', event => {
-      if (drag?.pointer !== event.pointerId) return;
-      if (drag.active) {
-        drag.x = event.clientX;
-        drag.y = event.clientY;
-        updateDropTarget();
-      }
-      const target = drag.target;
-      clearDrag();
-      if (target) moveCard(id, index, target.index, target.id, target.after);
-    });
-    handle.addEventListener('lostpointercapture', () => {
-      if (drag?.card === card) clearDrag();
-    });
+    bindDrag(handle, card, false, target => moveCard(id, index, target.index, target.id, target.after));
     handle.addEventListener('keydown', event => {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         event.preventDefault();
@@ -328,17 +317,90 @@
     return handle;
   }
 
+  function moveGroup(from, to, after) {
+    const position = to + Number(after) - Number(from < to);
+    if (position === from) return;
+    const [group] = editing.splice(from, 1);
+    editing.splice(position, 0, group);
+    arrangeDevices();
+    document.querySelector('[data-layout-group="' + position + '"] .layout-group-handle')
+      ?.focus({ preventScroll: true });
+  }
+
+  function groupHandle(section, index) {
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.className = 'layout-handle layout-group-handle';
+    handle.textContent = '⠿ グループを移動';
+    handle.setAttribute('aria-description', '上下キーでグループの順番を変更');
+    bindDrag(handle, section, true, target => moveGroup(index, target.index, target.after));
+    handle.addEventListener('keydown', event => {
+      const offset = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0;
+      if (!offset) return;
+      event.preventDefault();
+      const to = index + offset;
+      if (to > 0 && to < editing.length) moveGroup(index, to, offset > 0);
+    });
+    return handle;
+  }
+
+  function bindDrag(handle, element, group, drop) {
+    handle.addEventListener('pointerdown', event => {
+      if (!event.isPrimary || event.button !== 0 || drag) return;
+      handle.setPointerCapture(event.pointerId);
+      drag = { element, group, pointer: event.pointerId, x: event.clientX, y: event.clientY };
+    });
+    handle.addEventListener('pointermove', event => {
+      if (drag?.pointer !== event.pointerId) return;
+      if (!drag.active && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 5) return;
+      if (!drag.active) {
+        drag.active = true;
+        element.classList.add('layout-dragging');
+        drag.frame = requestAnimationFrame(scrollDrag);
+      }
+      drag.x = event.clientX;
+      drag.y = event.clientY;
+      updateDropTarget();
+    });
+    handle.addEventListener('pointerup', event => {
+      if (drag?.pointer !== event.pointerId) return;
+      if (drag.active) {
+        drag.x = event.clientX;
+        drag.y = event.clientY;
+        updateDropTarget();
+      }
+      const target = drag.target;
+      clearDrag();
+      if (target) drop(target);
+    });
+    handle.addEventListener('lostpointercapture', () => {
+      if (drag?.element === element) clearDrag();
+    });
+  }
+
   function updateDropTarget() {
     drag.marker?.classList.remove(drag.markerClass);
     drag.target = null;
     const hit = document.elementFromPoint(drag.x, drag.y);
     const section = hit?.closest('[data-layout-group]');
-    const card = hit?.closest('.device');
-    if (!section || card === drag.card) return;
+    if (!section) return;
+    const index = Number(section.dataset.layoutGroup);
+    if (drag.group) {
+      if (index === 0 || section === drag.element) return;
+      const rect = section.getBoundingClientRect();
+      const after = drag.y > rect.top + rect.height / 2;
+      drag.target = { index, after };
+      drag.marker = section;
+      drag.markerClass = after ? 'layout-drop-after' : 'layout-drop-before';
+      section.classList.add(drag.markerClass);
+      return;
+    }
+    const card = hit.closest('.device');
+    if (card === drag.element) return;
     const rect = card?.getBoundingClientRect();
     const multiColumn = card && card.parentElement.clientWidth > rect.width + 20;
     const after = card && (multiColumn ? drag.x > rect.left + rect.width / 2 : drag.y > rect.top + rect.height / 2);
-    drag.target = { index: Number(section.dataset.layoutGroup), id: card?.dataset.deviceId, after };
+    drag.target = { index, id: card?.dataset.deviceId, after };
     drag.marker = card || section;
     if (multiColumn) drag.markerClass = after ? 'layout-drop-right' : 'layout-drop-left';
     else drag.markerClass = card ? (after ? 'layout-drop-after' : 'layout-drop-before') : 'layout-drop-group';
@@ -358,7 +420,7 @@
   function clearDrag() {
     cancelAnimationFrame(drag.frame);
     drag.marker?.classList.remove(drag.markerClass);
-    drag.card.classList.remove('layout-dragging');
+    drag.element.classList.remove('layout-dragging');
     drag = null;
   }
 
